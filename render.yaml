@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: moto-bot
+    env: python
+    region: frankfurt   # или oregon — не важно
+    buildCommand: "pip install pyTelegramBotAPI flask"
+    startCommand: "python bot.py"
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MANAGERS
+        sync: false
