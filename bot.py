@@ -7,29 +7,29 @@ from flask import Flask
 print("🚀 Запуск системы...")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("❌ Переменная BOT_TOKEN не установлена!")
-
 MANAGERS = list(map(int, os.getenv("MANAGERS", "").split(",")))
+
+if not BOT_TOKEN:
+    raise RuntimeError("❌ BOT_TOKEN не задан!")
 if not MANAGERS:
-    raise ValueError("❌ MANAGERS пуст или неверен")
+    raise RuntimeError("❌ MANAGERS пуст!")
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 
-# Хранилище последних клиентов
 last_client = {}
 
 @bot.message_handler(func=lambda m: m.chat.id not in MANAGERS)
 def handle_client(m):
     for mid in MANAGERS:
         last_client[mid] = m.chat.id
+    for mid in MANAGERS:
         try:
             bot.forward_message(mid, m.chat.id, m.message_id)
         except Exception as e:
-            print(f"[Пересылка] Ошибка для {mid}: {e}")
+            print(f"[Forward] {e}")
 
 @bot.message_handler(func=lambda m: m.chat.id in MANAGERS)
-def handle_manager(m):
+def handle_reply(m):
     client_id = None
     if m.reply_to_message:
         if m.reply_to_message.forward_from:
@@ -41,24 +41,32 @@ def handle_manager(m):
     if client_id:
         try:
             bot.send_message(client_id, m.text)
-            print(f"[Ответ] Отправлен клиенту {client_id}")
+            print(f"[Reply] → {client_id}")
         except Exception as e:
-            print(f"[Ответ] Ошибка: {e}")
+            print(f"[Reply error] {e}")
     else:
-        print("[Ответ] Нет активного клиента")
+        print("[Reply] Клиент не найден")
 
-# ЗАПУСК БОТА В ФОНЕ — ДО Flask
-def run_bot():
-    print("✅ Бот запущен и слушает...")
-    while True:
-        try:
-            bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"🔁 Перезапуск бота: {e}")
-            time.sleep(5)
+# === ЗАПУСК БОТА ТОЛЬКО ОДИН РАЗ ===
+_bot_started = False
 
-# Стартуем бота СРАЗУ
-threading.Thread(target=run_bot, daemon=True).start()
+def ensure_bot_started():
+    global _bot_started
+    if _bot_started:
+        return
+    _bot_started = True
+    def run():
+        print("✅ Бот начал polling...")
+        while True:
+            try:
+                bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
+            except Exception as e:
+                print(f"🔁 Перезапуск: {e}")
+                time.sleep(5)
+    threading.Thread(target=run, daemon=True).start()
+
+# Запускаем бота ДО Flask
+ensure_bot_started()
 
 # Flask — только для health-check
 app = Flask(__name__)
@@ -67,8 +75,6 @@ app = Flask(__name__)
 def health():
     return "OK", 200
 
-# Главный запуск
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    print(f"📡 Flask слушает на порту {port}")
     app.run(host="0.0.0.0", port=port)
